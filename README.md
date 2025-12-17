@@ -70,10 +70,10 @@ python3 main.py --model edsr_fre --scale 4 --patch_size 192 --extra_loss --save 
 python3 main.py --model edsr_fre --scale 2 --data_test Set5+Set14+B100+Urban100+Manga109 --save_results --save test_results/EDSRfrex2_results --pre_train ../experiment/Offical_EDSRfrex2/edsr_fre_x2.pt
 
 # For X3
-python3 main.py --model edsr_fre --scale 3 --data_test Set5+Set14+B100+Urban100+Manga109 --save_results --test_only --save test_results/EDSRfrex2_results --pre_train ../experiment/Offical_EDSRfrex3/edsr_fre_x3.pt
+python3 main.py --model edsr_fre --scale 3 --data_test Set5+Set14+B100+Urban100+Manga109 --save_results --save test_results/EDSRfrex2_results --pre_train ../experiment/Offical_EDSRfrex3/edsr_fre_x3.pt
 
 # For X4
-python3 main.py --model edsr_fre --scale 4 --data_test Set5+Set14+B100+Urban100+Manga109 --save_results --test_only --save test_results/EDSRfrex2_results --pre_train ../experiment/Offical_EDSRfrex4/edsr_fre_x4.pt
+python3 main.py --model edsr_fre --scale 4 --data_test Set5+Set14+B100+Urban100+Manga109 --save_results --save test_results/EDSRfrex2_results --pre_train ../experiment/Offical_EDSRfrex4/edsr_fre_x4.pt
 ```
 
 ## Citation
