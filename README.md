@@ -1,6 +1,6 @@
 # FourierSR: A Fourier Token-based Plugin for Efficient Image Super-Resolution
 
-### [Paper (ArXiv)](https://arxiv.org/pdf/2503.10043) | [Paper (IEEE)]()
+### [Paper (ArXiv)](https://arxiv.org/pdf/2503.10043) | [Paper (IEEE)]() | [Supplementary Material](https://drive.google.com/file/d/1f8HkDjl8Hu0rxLFMLW7TzeqKzdQjhpLr/view?usp=sharing)
 
 ---
 ## Contents
@@ -37,7 +37,7 @@ The code and datasets need satisfy the following structures:
 
 Our SR Results can be downloaded from <a href="https://drive.google.com/file/d/1aiwz11jVFezUed5q-24VCVfNOy0C9ja4/view?usp=drive_link">here</a>.
 
-Pretrained models can be found in <a href="">experiments</a>.
+Pretrained models can be found in <a href="https://drive.google.com/file/d/1VmsmDckdnWg57ntdx8LtIhGh4TPEf6nG/view?usp=drive_link">here</a>.
 
 ---
 
