@@ -35,7 +35,7 @@ The code and datasets need satisfy the following structures:
 
 ## Results
 
-Our SR Results can be downloaded from <a href="https://drive.google.com/file/d/1aiwz11jVFezUed5q-24VCVfNOy0C9ja4/view?usp=drive_link">here</a>.
+Our SR Results can be downloaded from <a href="https://drive.google.com/file/d/1mg_rgX9SLlwwxrkwGeiAWzF1lqhl-GRB/view?usp=drive_link">here</a>.
 
 Pretrained models can be found in <a href="https://drive.google.com/file/d/1VmsmDckdnWg57ntdx8LtIhGh4TPEf6nG/view?usp=drive_link">here</a>.
 
