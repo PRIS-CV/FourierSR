@@ -1,0 +1,273 @@
+import os
+import math
+from decimal import Decimal
+import utils as util
+import utility
+from torch.nn import functional as F
+import torch
+import torch.nn.utils as utils
+from tqdm import tqdm
+
+class Trainer():
+    def __init__(self, args, loader, my_model, my_loss, ckp):
+        self.args = args
+        self.scale = args.scale
+
+        self.ckp = ckp
+        self.loader_train = loader.loader_train
+        self.loader_test = loader.loader_test
+        self.model = my_model
+        self.loss = my_loss
+        self.optimizer = utility.make_optimizer(args, self.model)
+
+        if self.args.load != '':
+            self.optimizer.load(ckp.dir, epoch=len(ckp.log))
+
+        self.error_last = 1e8
+
+    def train(self):
+        self.loss.step()
+        epoch = self.optimizer.get_last_epoch() + 1
+        lr = self.optimizer.get_lr()
+
+        self.ckp.write_log(
+            '[Epoch {}]\tLearning rate: {:.2e}'.format(epoch, Decimal(lr))
+        )
+        self.loss.start_log()
+        self.model.train()
+
+        timer_data, timer_model = utility.timer(), utility.timer()
+        # TEMP
+        self.loader_train.dataset.set_scale(0)
+        #for batch, (lr, hr, _,idx_scale) in enumerate(self.loader_train):
+        for batch, (lr, hr, _) in enumerate(self.loader_train):
+       
+            lr, hr = self.prepare(lr, hr)
+            
+            timer_data.hold()
+            timer_model.tic()
+
+            self.optimizer.zero_grad() 
+            #sr = self.model(lr, idx_scale)           
+            sr = self.model(lr, 0)
+            loss = self.loss(sr, hr)
+            loss.backward()
+            if self.args.gclip > 0:
+                utils.clip_grad_value_(
+                    self.model.parameters(),
+                    self.args.gclip
+                )
+            self.optimizer.step()
+
+            timer_model.hold()
+
+            if (batch + 1) % self.args.print_every == 0:
+                self.ckp.write_log('[{}/{}]\t{}\t{:.1f}+{:.1f}s'.format(
+                    (batch + 1) * self.args.batch_size,
+                    len(self.loader_train.dataset),
+                    self.loss.display_loss(batch),
+                    timer_model.release(),
+                    timer_data.release()))
+
+            timer_data.tic()
+
+        self.loss.end_log(len(self.loader_train))
+        self.error_last = self.loss.log[-1, -1]
+        self.optimizer.schedule()
+
+    def test(self):
+        torch.set_grad_enabled(False)
+
+        epoch = self.optimizer.get_last_epoch()
+        self.ckp.write_log('\nEvaluation:')
+        self.ckp.add_log(
+            torch.zeros(1, len(self.loader_test), len(self.scale))
+        )
+        self.model.eval()
+
+        timer_test = utility.timer()
+        if self.args.save_results: self.ckp.begin_background()
+        for idx_data, d in enumerate(self.loader_test):
+            for idx_scale, scale in enumerate(self.scale):
+                eval_ssim = 0 ######## ssim
+                d.dataset.set_scale(idx_scale)
+                for lr, hr, filename in tqdm(d, ncols=80):
+                #for lr, hr, filename,_ in tqdm(d, ncols=80):
+                    lr, hr = self.prepare(lr, hr)
+                    if self.args.model.find("swinir") >= 0:
+                        window_size = 8
+                        scale = self.args.scale[0]
+                        mod_pad_h, mod_pad_w = 0, 0
+                        _, _, h, w = lr.size()
+                        if h % window_size != 0:
+                            mod_pad_h = window_size - h % window_size
+                        if w % window_size != 0:
+                            mod_pad_w = window_size - w % window_size
+                        lr = F.pad(lr, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+                        sr = self.model(lr, 0)
+                        _, _, h, w = sr.size()
+                        sr = sr[:, :, 0:h - mod_pad_h * scale, 0:w - mod_pad_w * scale]
+                    else:
+                        sr = self.model(lr, idx_scale)
+                    sr = utility.quantize(sr, self.args.rgb_range)
+
+                    ############ add calculate ssim by lwj ###########
+                    hr_another = hr.clamp(0, 255)
+                    sr_another = sr
+                    if isinstance(sr, list): sr = sr[-1]
+                    sr_another = sr_another.clamp(0, 255)
+                    hr_ycbcr = utility.rgb_to_ycbcr(hr_another)
+                    sr_ycbcr = utility.rgb_to_ycbcr(sr_another)
+                    hr_another = hr_ycbcr[:, 0:1, :, :]
+                    sr_another = sr_ycbcr[:, 0:1, :, :]
+                    hr_another = hr_another[:, :, scale:-scale, scale:-scale]
+                    sr_another = sr_another[:, :, scale:-scale, scale:-scale]
+                    eval_ssim += utility.calc_ssim(sr_another, hr_another)
+                    ############ add calculate ssim by lwj ###########
+
+                    save_list = [sr]
+                    self.ckp.log[-1, idx_data, idx_scale] += utility.calc_psnr(
+                        sr, hr, scale, self.args.rgb_range, dataset=d
+                    )
+                    if self.args.save_gt:
+                        save_list.extend([lr, hr])
+
+                    if self.args.save_results:
+                        self.ckp.save_results(d, filename[0], save_list, scale)
+
+                self.ckp.log[-1, idx_data, idx_scale] /= len(d)
+                best = self.ckp.log.max(0)
+                self.ckp.write_log(
+                    '[{} x{}]\tPSNR: {:.3f} SSIM: {:.5f} (Best: {:.3f} @epoch {})'.format(
+                        d.dataset.name,
+                        scale,
+                        self.ckp.log[-1, idx_data, idx_scale],
+                        eval_ssim / len(d),
+                        best[0][idx_data, idx_scale],
+                        best[1][idx_data, idx_scale] + 1
+                    )
+                )
+
+        self.ckp.write_log('Forward: {:.2f}s\n'.format(timer_test.toc()))
+        self.ckp.write_log('Saving...')
+
+        if self.args.save_results:
+            self.ckp.end_background()
+
+        if not self.args.test_only:
+            self.ckp.save(self, epoch, is_best=(best[1][0, 0] + 1 == epoch))
+
+        self.ckp.write_log(
+            'Total: {:.2f}s\n'.format(timer_test.toc()), refresh=True
+        )
+
+        torch.set_grad_enabled(True)
+
+    def test_iK(self):
+        torch.set_grad_enabled(False)
+
+        epoch = self.optimizer.get_last_epoch()
+        self.ckp.write_log('\nEvaluation:')
+        self.ckp.add_log(
+            torch.zeros(1, len(self.loader_test), len(self.scale))
+        )
+        self.model.eval()
+
+        timer_test = utility.timer()
+        if self.args.save_results: self.ckp.begin_background()
+        for idx_data, d in enumerate(self.loader_test):
+            for idx_scale, scale in enumerate(self.scale):
+                eval_ssim = 0 ######## ssim
+                d.dataset.set_scale(idx_scale)
+                for lr, hr, filename in tqdm(d, ncols=80):
+                #for lr, hr, filename,_ in tqdm(d, ncols=80):
+                    lr, hr = self.prepare(lr, hr)
+                    if self.args.model.find("swinir") >= 0:
+                        window_size = 8
+                        scale = self.args.scale[0]
+                        mod_pad_h, mod_pad_w = 0, 0
+                        _, _, h, w = lr.size()
+                        if h % window_size != 0:
+                            mod_pad_h = window_size - h % window_size
+                        if w % window_size != 0:
+                            mod_pad_w = window_size - w % window_size
+                        lr = F.pad(lr, (0, mod_pad_w, 0, mod_pad_h), 'reflect')
+                        sr = self.model(lr, 0)
+                        _, _, h, w = sr.size()
+                        sr = sr[:, :, 0:h - mod_pad_h * scale, 0:w - mod_pad_w * scale]
+                    else:
+                        sr = self.model(lr, idx_scale)
+
+                    import numpy as np
+                    gt_img = util.tensor2img(hr, out_type=np.uint8, min_max=(0, 255))
+                    sr_img = util.tensor2img(sr, out_type=np.uint8, min_max=(0, 255))
+
+                    sr_img, gt_img = util.crop_border([sr_img, gt_img], self.args.scale[0])
+                    print(sr_img.shape)
+                    psnr = util.calculate_psnr(sr_img, gt_img)
+                    ssim = util.calculate_ssim(sr_img, gt_img)
+
+                    # if gt_img.shape[2] == 3:  # RGB image
+                    #     sr_img_y = util.bgr2ycbcr(sr_img / 255., only_y=True)
+                    #     gt_img_y = util.bgr2ycbcr(gt_img / 255., only_y=True)
+
+                    #     psnr_y = util.calculate_psnr(sr_img_y * 255, gt_img_y * 255)
+                    #     ssim_y = util.calculate_ssim(sr_img_y * 255, gt_img_y * 255)
+                    
+                    eval_ssim += ssim
+
+
+                    save_list = [sr]
+                    self.ckp.log[-1, idx_data, idx_scale] += psnr
+                    if self.args.save_gt:
+                        save_list.extend([lr, hr])
+
+                    if self.args.save_results:
+                        self.ckp.save_results(d, filename[0], save_list, scale)
+
+                self.ckp.log[-1, idx_data, idx_scale] /= len(d)
+                best = self.ckp.log.max(0)
+                self.ckp.write_log(
+                    '[{} x{}]\tPSNR: {:.3f} SSIM: {:.5f} (Best: {:.3f} @epoch {})'.format(
+                        d.dataset.name,
+                        scale,
+                        self.ckp.log[-1, idx_data, idx_scale],
+                        eval_ssim / len(d),
+                        best[0][idx_data, idx_scale],
+                        best[1][idx_data, idx_scale] + 1
+                    )
+                )
+
+        self.ckp.write_log('Forward: {:.2f}s\n'.format(timer_test.toc()))
+        self.ckp.write_log('Saving...')
+
+        if self.args.save_results:
+            self.ckp.end_background()
+
+        if not self.args.test_only:
+            self.ckp.save(self, epoch, is_best=(best[1][0, 0] + 1 == epoch))
+
+        self.ckp.write_log(
+            'Total: {:.2f}s\n'.format(timer_test.toc()), refresh=True
+        )
+
+        torch.set_grad_enabled(True)
+
+    def prepare(self, *args):
+        device = torch.device('cpu' if self.args.cpu else 'cuda')
+        def _prepare(tensor):
+            if self.args.precision == 'half': tensor = tensor.half()
+            return tensor.to(device)
+
+        return [_prepare(a) for a in args]
+
+    def terminate(self):
+        if self.args.test_only:
+            if self.args.iK:
+                self.test_iK()
+            else:
+                self.test()
+            return True
+        else:
+            epoch = self.optimizer.get_last_epoch() + 1
+            return epoch >= self.args.epochs
