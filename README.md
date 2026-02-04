@@ -86,10 +86,13 @@ python3 main.py --model edsr_fre --scale 4 --data_test Set5+Set14+B100+Urban100+
 If this work is helpful for your research, please consider citing the following BibTeX entry.
 ```
 @article{li2026fouriersr,
-  title={FourierSR: A Fourier Token-based Plugin for Efficient Image Super-Resolution},
+  title={Fouriersr: A fourier token-based plugin for efficient image super-resolution},
   author={Li, Wenjie and Guo, Heng and Hou, Yuefeng and Ma, Zhanyu},
   journal={IEEE Transactions on Image Processing},
-  year={2026}
+  volume={35},
+  pages={732--742},
+  year={2026},
+  publisher={IEEE}
 }
 ```
 
